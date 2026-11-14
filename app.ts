@@ -1121,7 +1121,8 @@ function commentJson(repo: Repo, comment: IssueComment): Record<string, unknown>
 
 function commitJson(repo: Repo, oid: string): Record<string, unknown> {
   const view = commitView(repo, oid);
-  const message = view?.message ?? '';
+  // The stored object keeps git's trailing newline; the API presents the message as sent.
+  const message = (view?.message ?? '').replace(/\n+$/, '');
   return {
     sha: oid,
     commit: {
@@ -1703,12 +1704,17 @@ function routeRest(ctx: Ctx): void {
 
   if (segments.length === 0 || segments[0] === '') {
     if (method === 'GET') {
-      sendJson(ctx.res, 200, {
-        current_user_url: '/api/v3/user',
-        repository_url: '/api/v3/repos/{owner}/{repo}',
-        user_repositories_url: '/api/v3/user/repos',
-        meta_url: '/api/v3/meta',
-      });
+      sendJson(
+        ctx.res,
+        200,
+        {
+          current_user_url: '/api/v3/user',
+          repository_url: '/api/v3/repos/{owner}/{repo}',
+          user_repositories_url: '/api/v3/user/repos',
+          meta_url: '/api/v3/meta',
+        },
+        { 'x-oauth-scopes': 'repo, read:org' },
+      );
       return;
     }
     sendError(ctx.res, 404, 'Not Found');
@@ -2006,9 +2012,20 @@ function computeSendSet(
   }
   const commits = new Set<string>();
   for (const oid of wanted) if (!haveSet.has(oid)) commits.add(oid);
+  // Objects the client already holds: everything reachable from the haves (their trees included),
+  // walking parents only until a shallow boundary. These must not be re-sent: an incremental fetch
+  // sends exactly reachable(wants) minus reachable(haves), so a blob shared by the old and new tip
+  // stays home even though the new tip's tree names it.
+  const held = new Set<string>(haveSet);
+  for (const oid of haveSet) {
+    const view = commitView(repo, oid);
+    if (!view) continue;
+    for (const treeOid of collectReachable([view.tree], (candidate) => repo.objects.get(candidate))) held.add(treeOid);
+  }
   // Pack objects: the sent commits plus everything under their trees (not their parents).
   const objects = new Map<string, GitObject>();
   const addObject = (oid: string): void => {
+    if (held.has(oid)) return;
     const object = repo.objects.get(oid);
     if (object && !objects.has(oid)) objects.set(oid, object);
   };
