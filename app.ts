@@ -1254,7 +1254,7 @@ function createRef(ctx: Ctx, repo: Repo): void {
   sendJson(ctx.res, 201, { ref, object: { sha, type: 'commit' } });
 }
 
-function listCommits(ctx: Ctx, repo: Repo): void {
+function listCommitsRoute(ctx: Ctx, repo: Repo): void {
   const shaParam = ctx.query.get('sha');
   const tip = shaParam !== null ? resolveRef(repo, shaParam) : repo.refs.get(`refs/heads/${repo.defaultBranch}`) ?? null;
   if (!tip) {
@@ -1801,7 +1801,7 @@ function routeRest(ctx: Ctx): void {
     }
     if (rest[0] === 'commits') {
       if (rest.length === 1 && method === 'GET') {
-        listCommits(ctx, repo);
+        listCommitsRoute(ctx, repo);
         return;
       }
       sendError(ctx.res, 404, 'Not Found');
